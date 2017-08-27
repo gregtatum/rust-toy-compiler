@@ -1,0 +1,8 @@
+[package]
+name = "kal"
+version = "0.1.0"
+authors = ["Greg Tatum <tatum.creative@gmail.com>"]
+
+[dependencies]
+readline = { git = "https://github.com/shaleh/rust-readline" }
+term-painter = "0.2.4"
