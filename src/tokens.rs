@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
+
 use std::fmt;
 use std::str::Chars;
 use std::iter::Peekable;
@@ -13,35 +14,61 @@ pub enum Token {
     Extern,
     Identifier(StringIndex),
     Number(f64),
-    Char(char),
+    Char(Character),
 }
 
-pub enum CharacterType {
+#[derive(Debug, Clone, Copy)]
+pub enum Character {
     Whitespace,
     Alpha,
     Numeric,
     Unknown,
     Pound,
     Period,
+    LeftParens,
+    RightParens,
+    Comma,
+    LessThan,
+    GreaterThan,
+    Plus,
+    Minus,
 }
 
-fn char_to_enum(character: &char) -> CharacterType {
+fn char_to_enum(character: &char) -> Character {
     if character.is_numeric() {
-        return CharacterType::Numeric;
+        return Character::Numeric;
     }
     if character.is_alphabetic() {
-        return CharacterType::Alpha;
+        return Character::Alpha;
     }
     if character.is_whitespace() {
-        return CharacterType::Whitespace
+        return Character::Whitespace;
     }
     if *character == '#' {
-        return CharacterType::Pound
+        return Character::Pound;
     }
     if *character == '.' {
-        return CharacterType::Period
+        return Character::Period;
     }
-    return CharacterType::Unknown
+    if *character == '(' {
+        return Character::LeftParens;
+    }
+    if *character == ')' {
+        return Character::RightParens;
+    }
+    if *character == '<' {
+        return Character::LessThan;
+    }
+    if *character == '>' {
+        return Character::GreaterThan;
+    }
+    if *character == '+' {
+        return Character::Plus;
+    }
+    if *character == '-' {
+        return Character::Minus;
+    }
+    return Character::Unknown
 }
 
 impl fmt::Display for Token {
@@ -52,7 +79,7 @@ impl fmt::Display for Token {
             &Token::Extern => write!(f, "(extern)"),
             &Token::Identifier(_) => write!(f, "(identifier)"),
             &Token::Number(n) => write!(f, "(number {})", n),
-            &Token::Char(c) => write!(f, "(char {})", c),
+            &Token::Char(c) => write!(f, "(char {:?})", c),
         }
     }
 }
@@ -92,24 +119,23 @@ pub fn get_tokens(text: &str) -> Vec<Token> {
     // to a for-in, but keeping it terse.
     iter_next!(characters, character => {
         match char_to_enum(&character) {
-            CharacterType::Whitespace => continue,
-            CharacterType::Pound => skip_to_end_of_line(&mut characters),
-            CharacterType::Numeric => tokens.push(
+            Character::Whitespace => continue,
+            Character::Pound => skip_to_end_of_line(&mut characters),
+            Character::Numeric => tokens.push(
                 Token::Number(get_number(&mut characters, character))
             ),
-            CharacterType::Alpha => {
+            Character::Alpha => tokens.push({
                 let word = get_word(&mut characters, &character);
                 if word == "def" {
-                    tokens.push(Token::Def);
-                    continue;
+                    Token::Def
+                } else if word == "extern" {
+                    Token::Extern
+                } else {
+                    Token::Identifier(string_table.take_string(word))
                 }
-                if word == "extern" {
-                    tokens.push(Token::Extern);
-                    continue;
-                }
-                tokens.push(Token::Identifier(string_table.take_string(word)));
-            },
-            _ => tokens.push(Token::Char(character))
+            }),
+            Character::Unknown => println!("Unknown character {}", character),
+            character_type => tokens.push(Token::Char(character_type))
         }
     });
 
@@ -129,7 +155,7 @@ fn get_word(characters: &mut Peekable<Chars>, starting_char: &char) -> String {
     word.push(*starting_char);
 
     iter_peek_match!(characters, character => {
-        CharacterType::Alpha | CharacterType::Numeric => {
+        Character::Alpha | Character::Numeric => {
             word.push(character);
             characters.next();
         },
@@ -144,17 +170,17 @@ fn get_number(characters: &mut Peekable<Chars>, starting_digit: char) -> f64 {
     word.push(starting_digit);
 
     iter_peek_match!(characters, character => {
-        CharacterType::Numeric => {
+        Character::Numeric => {
             word.push(character);
             characters.next();
         },
-        CharacterType::Period => {
+        Character::Period => {
             word.push(character);
             characters.next();
 
             // Find the remaining digits.
             iter_peek_match!(characters, character => {
-                CharacterType::Numeric => {
+                Character::Numeric => {
                     word.push(character);
                     characters.next();
                 },

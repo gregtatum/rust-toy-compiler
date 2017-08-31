@@ -1,4 +1,5 @@
 pub mod tokens;
+pub mod parser;
 pub mod string_table;
 pub use tokens::get_tokens;
 
