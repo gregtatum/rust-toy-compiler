@@ -14,7 +14,7 @@ pub enum Token {
     Extern,
     Identifier(StringIndex),
     Number(f64),
-    Char(Character),
+    Char(char),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -22,16 +22,7 @@ pub enum Character {
     Whitespace,
     Alpha,
     Numeric,
-    Unknown,
-    Pound,
-    Period,
-    LeftParens,
-    RightParens,
-    Comma,
-    LessThan,
-    GreaterThan,
-    Plus,
-    Minus,
+    Value(char),
 }
 
 fn char_to_enum(character: &char) -> Character {
@@ -44,31 +35,7 @@ fn char_to_enum(character: &char) -> Character {
     if character.is_whitespace() {
         return Character::Whitespace;
     }
-    if *character == '#' {
-        return Character::Pound;
-    }
-    if *character == '.' {
-        return Character::Period;
-    }
-    if *character == '(' {
-        return Character::LeftParens;
-    }
-    if *character == ')' {
-        return Character::RightParens;
-    }
-    if *character == '<' {
-        return Character::LessThan;
-    }
-    if *character == '>' {
-        return Character::GreaterThan;
-    }
-    if *character == '+' {
-        return Character::Plus;
-    }
-    if *character == '-' {
-        return Character::Minus;
-    }
-    return Character::Unknown
+    return Character::Value(character.clone());
 }
 
 impl fmt::Display for Token {
@@ -79,22 +46,12 @@ impl fmt::Display for Token {
             &Token::Extern => write!(f, "(extern)"),
             &Token::Identifier(_) => write!(f, "(identifier)"),
             &Token::Number(n) => write!(f, "(number {})", n),
-            &Token::Char(c) => write!(f, "(char {:?})", c),
+            &Token::Char(ref value) => write!(f, "(char {:?})", value),
         }
     }
 }
 
-macro_rules! iter_next {
-    ($iter:ident, $item:ident => $body:expr) => {
-        loop {
-            match $iter.next() {
-                Some($item) => $body,
-                None => break,
-            }
-        }
-    };
-}
-
+// This is convenience sugar over peeking and matching an enum.
 macro_rules! iter_peek_match {
     ($iterator:ident, $item:ident => $match_body:tt) => {
         loop {
@@ -115,39 +72,46 @@ pub fn get_tokens(text: &str) -> Vec<Token> {
     // Provide a shareable, mutable iterator over the characters.
     let mut characters = IntoIterator::into_iter(text.chars()).peekable();
 
-    // This macro is convenience sugar to run the iterator without resorting
-    // to a for-in, but keeping it terse.
-    iter_next!(characters, character => {
-        match char_to_enum(&character) {
-            Character::Whitespace => continue,
-            Character::Pound => skip_to_end_of_line(&mut characters),
-            Character::Numeric => tokens.push(
-                Token::Number(get_number(&mut characters, character))
-            ),
-            Character::Alpha => tokens.push({
-                let word = get_word(&mut characters, &character);
-                if word == "def" {
-                    Token::Def
-                } else if word == "extern" {
-                    Token::Extern
-                } else {
-                    Token::Identifier(string_table.take_string(word))
+    loop {
+        match characters.next() {
+            Some(character) => {
+                match char_to_enum(&character) {
+                    Character::Whitespace => continue,
+                    Character::Value('#') => skip_to_end_of_line(&mut characters),
+                    Character::Numeric => tokens.push(
+                        Token::Number(get_number(&mut characters, character))
+                    ),
+                    Character::Alpha => tokens.push({
+                        let word = get_word(&mut characters, &character);
+                        if word == "def" {
+                            Token::Def
+                        } else if word == "extern" {
+                            Token::Extern
+                        } else {
+                            Token::Identifier(string_table.take_string(word))
+                        }
+                    }),
+                    Character::Value(value) => tokens.push(Token::Char(value))
                 }
-            }),
-            Character::Unknown => println!("Unknown character {}", character),
-            character_type => tokens.push(Token::Char(character_type))
+            },
+            None => break,
         }
-    });
+    }
 
     tokens
 }
 
 fn skip_to_end_of_line(characters: &mut Peekable<Chars>) {
-    iter_next!(characters, character => {
-        if character == '\n' {
-            break;
+    loop {
+        match characters.next() {
+            Some(character) => {
+                if character == '\n' {
+                    break;
+                }
+            },
+            None => break,
         }
-    })
+    }
 }
 
 fn get_word(characters: &mut Peekable<Chars>, starting_char: &char) -> String {
@@ -174,7 +138,7 @@ fn get_number(characters: &mut Peekable<Chars>, starting_digit: char) -> f64 {
             word.push(character);
             characters.next();
         },
-        Character::Period => {
+        Character::Value('.') => {
             word.push(character);
             characters.next();
 
