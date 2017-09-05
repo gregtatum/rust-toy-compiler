@@ -1,5 +1,6 @@
 #![allow(dead_code,unused_variables,unused_imports)]
 
+use std::fmt;
 use string_table::StringIndex;
 use string_table::StringTable;
 use tokens::Token;
@@ -7,43 +8,59 @@ use tokens::Character;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone)]
+pub struct ProgramData {
+    pub body: Vec<SyntaxNode>
+}
+
+#[derive(Debug,PartialEq,Clone)]
 pub struct CallExpressionData {
     pub callee: StringIndex,
     pub args: Vec<SyntaxNode>
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone)]
 pub struct PrototypeData {
     pub name: Option<StringIndex>,
     pub args: Vec<StringIndex>
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone)]
 pub struct BinaryExpressionData {
     pub operation: char,
     pub lhs: Box<SyntaxNode>,
     pub rhs: Box<SyntaxNode>,
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone)]
 pub struct DefinitionData {
     prototype: Box<SyntaxNode>,
     body: Box<SyntaxNode>,
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone)]
 pub enum SyntaxNode {
+    Program(ProgramData),
     Number(f64),
     Variable(StringIndex),
     BinaryExpression(BinaryExpressionData),
     CallExpression(CallExpressionData),
     Prototype(PrototypeData),
     Definition(DefinitionData),
-    Empty,
+    TODO,
 }
 
-#[derive(Debug,PartialEq)]
+// impl fmt::Display for SyntaxNode {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         match self {
+//
+//         }
+//         write!(f, "({}, {})", self.x, self.y)
+//     }
+// }
+
+
+#[derive(Debug,PartialEq,Clone)]
 pub enum ParseError {
     UnmatchedParen,
     UnknownArgumentValue,
@@ -51,342 +68,161 @@ pub enum ParseError {
     NoArgIdentifier,
     ExpectedOpeningParens,
     NoFunctionName,
+    UnknownCharacterInProgram,
+    ExpectedTerm,
 }
 
 type PeekableTokens = Peekable<IntoIter<Token>>;
+type ResultNode = Result<SyntaxNode, ParseError>;
 
-fn parse_number(mut tokens: &mut PeekableTokens, number: f64) -> Result<SyntaxNode, ParseError> {
+// FUNCTION -> "function" (identifier, ...) {
+//               BLOCK
+//               RETURN_EXPRESSION
+//             }
+//             e.g. function () { return 0; }
+//             e.g. funtion (a, b) { a = a + b; return a }
+fn parse_function (tokens: &mut PeekableTokens) -> ResultNode {
     tokens.next();
-    Ok(SyntaxNode::Number(number))
+    Ok(SyntaxNode::TODO)
 }
 
-fn parse_parens(mut tokens: &mut PeekableTokens) -> Result<SyntaxNode, ParseError> {
-    // Skip `(`
-    tokens.next();
-    let expression = parse_expression(&mut tokens)?;
-
-    // Skip `)`
+// TERM -> VARIABLE
+//       | NUMBER
+fn parse_term (tokens: &mut PeekableTokens) -> ResultNode {
     match tokens.next() {
-        Some(Token::Char(')')) => Ok(expression),
-        _ => Err(ParseError::UnmatchedParen),
+        Some(Token::Identifier(string_index)) => Ok(SyntaxNode::Variable(string_index)),
+        Some(Token::Number(number)) => Ok(SyntaxNode::Number(number)),
+        _ => Err(ParseError::ExpectedTerm),
     }
 }
+fn make_binary_expression(operation: char, lhs: SyntaxNode, rhs: SyntaxNode) -> ResultNode {
+    Ok(SyntaxNode::BinaryExpression(BinaryExpressionData {
+        operation: operation,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+    }))
+}
 
-fn parse_identifier(
-    mut tokens: &mut PeekableTokens,
-    identifier_string: StringIndex
-) -> Result<SyntaxNode, ParseError> {
-    // Skip the identifier.
-    tokens.next();
+// EXPRESSION -> VARIABLE
+//             | NUMBER
+//             | EXPRESSION BINOP EXPRESSION
+fn parse_expression (mut tokens: &mut PeekableTokens) -> ResultNode {
+    // Given the cases (a + b), (a + b + c), (a * b + c)
+    let a = parse_term(tokens)?;
 
-    match tokens.peek() {
-        // Match for function call
-        Some(&Token::Char('(')) => {
-            tokens.next();
-            let mut args = Vec::new();
-            loop {
-                match parse_expression(&mut tokens) {
-                    Ok(expression) => args.push(expression),
-                    Err(error) => return Err(error)
-                };
-                match tokens.next() {
-                    Some(Token::Char(')')) => {
-                        return Ok(SyntaxNode::CallExpression(CallExpressionData {
-                            callee: identifier_string,
-                            args: args,
-                        }))
+    match if_binary_operator_get_precedence(tokens.peek()) {
+        // The next token is not a binary operation.
+        None => Ok(a),
+        Some(a_b_precedence) => {
+            // There is a precedence, we have a binary operation, continue processing.
+            match tokens.next() {
+                Some(Token::Char(a_b_operation)) => {
+                    let b = parse_term(&mut tokens)?;
+                    match if_binary_operator_get_precedence(tokens.peek()) {
+                        // Handle case (a + b), where no binary expressions follow.
+                        None => make_binary_expression(a_b_operation, a, b),
+                        // Handle (a + b + c) where operations keep on following.
+                        Some(b_c_precedence) => {
+                            match tokens.next() {
+                                Some(Token::Char(b_c_operation)) => {
+                                    let c = parse_expression(&mut tokens)?;
+                                    if a_b_precedence >= b_c_precedence {
+                                        // (a + b + c) -> (+ (+ a b) c)
+                                        // (a * b + c) -> (+ (* a b) c)
+                                        make_binary_expression(
+                                            b_c_operation,
+                                            make_binary_expression(a_b_operation, a, b)?,
+                                            c
+                                        )
+                                    } else {
+                                        // (a + b * c) (+ a (* b c))
+                                        make_binary_expression(
+                                            a_b_operation,
+                                            a,
+                                            make_binary_expression(b_c_operation, b, c)?
+                                        )
+                                    }
+                                },
+                                _ => panic!("An operation char should have been extracted"),
+                            }
+                        }
                     }
-                    Some(Token::Char(',')) => continue,
-                    _ => return Err(ParseError::UnknownArgumentValue),
-                };
+                },
+                _ => panic!("An operation char should have been extracted"),
             }
-        },
-        _ => return Ok(SyntaxNode::Variable(identifier_string))
-    }
-}
-
-fn parse_expression(mut tokens: &mut PeekableTokens) -> Result<SyntaxNode, ParseError> {
-    let lhs = parse_primary(&mut tokens)?;
-    parse_binary_operation_rhs(&mut tokens, 0, lhs)
-}
-
-fn parse_binary_operation_rhs(
-    mut tokens: &mut PeekableTokens,
-    lhs_precedence: i32,
-    lhs: SyntaxNode
-) -> Result<SyntaxNode, ParseError> {
-    let operator_precedence = get_token_precedence(&tokens.peek());
-    if operator_precedence < lhs_precedence {
-        return Ok(lhs);
-    }
-    // This is a binary operation, skip over the token.
-    let operation_char = match tokens.next() {
-        Some(Token::Char(op_char)) => op_char,
-        _ => panic!("This should be an operation character.")
-    };
-
-    // Parse the rhs expression
-    let rhs = parse_primary(&mut tokens)?;
-
-    if operator_precedence < get_token_precedence(&tokens.peek()) {
-        return parse_binary_operation_rhs(&mut tokens, operator_precedence + 1, rhs)
-    } else {
-        return Ok(SyntaxNode::BinaryExpression(BinaryExpressionData {
-            operation: operation_char,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-        }))
-    }
-}
-
-fn parse_primary(mut tokens: &mut PeekableTokens) -> Result<SyntaxNode, ParseError> {
-    match tokens.peek() {
-        Some(&Token::Identifier(string_index)) => parse_identifier(&mut tokens, string_index),
-        Some(&Token::Number(number)) => parse_number(&mut tokens, number),
-        Some(&Token::Char('(')) => parse_parens(&mut tokens),
-        _ => Err(ParseError::NotExpressionToken),
-    }
-}
-
-fn get_token_precedence(token: &Option<&Token>) -> i32 {
-    match token {
-        &Some(&Token::Char('<')) => 10,
-        &Some(&Token::Char('+')) => 20,
-        &Some(&Token::Char('-')) => 30,
-        &Some(&Token::Char('*')) => 40,
-        _ => -1,
-    }
-}
-
-fn get_operator_precedence(character: &char) -> i32 {
-    match character {
-        &'<' => 10,
-        &'+' => 20,
-        &'-' => 30,
-        &'*' => 40,
-        &_ => panic!("There should not be an unknown char"),
-    }
-}
-
-fn parse_tokens (tokens_vec: Vec<Token>) -> Result<SyntaxNode, ParseError> {
-    // Provide a shareable, mutable iterator over the characters.
-    let mut tokens = IntoIterator::into_iter(tokens_vec).peekable();
-    let mut ast = Ok(SyntaxNode::Empty);
-    loop {
-        match tokens.peek() {
-            None => break,
-            Some(&Token::Char(';')) => { tokens.next(); },
-            Some(&Token::Def) => {
-                ast = parse_definition(&mut tokens);
-            },
-            // Token::Extern => parse_extern(&tokens),
-            _ => {
-                ast = parse_top_level_expression(&mut tokens);
-            },
-
         }
     }
-    return ast;
 }
 
-fn parse_top_level_expression(mut tokens: &mut PeekableTokens) -> Result<SyntaxNode, ParseError> {
-    let expression = parse_expression(&mut tokens)?;
-    // Place the expression in an anonymous definition.
-    Ok(SyntaxNode::Definition(DefinitionData {
-        prototype: Box::new(SyntaxNode::Prototype(PrototypeData {
-            name: None,
-            args: Vec::new()
-        })),
-        body: Box::new(expression),
-    }))
-}
-
-fn parse_definition(mut tokens: &mut PeekableTokens) -> Result<SyntaxNode, ParseError> {
-    tokens.next(); // skip "def"
-    Ok(SyntaxNode::Definition(DefinitionData {
-        prototype: Box::new(parse_prototype(&mut tokens)?),
-        body: Box::new(parse_expression(&mut tokens)?),
-    }))
-}
-
-fn parse_prototype(mut tokens: &mut PeekableTokens) -> Result<SyntaxNode, ParseError> {
-    match tokens.next() {
-        Some(Token::Identifier(function_name)) => {
-            match tokens.next() {
-                Some(Token::Char('(')) => {
-                    let mut args = Vec::new();
-                    loop {
-                        match tokens.next() {
-                            Some(Token::Char(')')) => break,
-                            Some(Token::Identifier(arg_name)) => args.push(arg_name),
-                            _ => return Err(ParseError::NoArgIdentifier),
-                        }
-                        match tokens.peek() {
-                            Some(&Token::Char(',')) => { tokens.next(); },
-                            _ => {},
-                        }
-                    }
-                    Ok(SyntaxNode::Prototype(PrototypeData {
-                        name: Some(function_name),
-                        args: args,
-                    }))
-                },
-                _ => Err(ParseError::ExpectedOpeningParens),
-            }
-        },
-        _ => Err(ParseError::NoFunctionName),
+fn if_binary_operator_get_precedence(token: Option<&Token>) -> Option<i32> {
+    match token {
+        Some(&Token::Char('+')) => Some(1),
+        Some(&Token::Char('-')) => Some(1),
+        Some(&Token::Char('*')) => Some(2),
+        Some(&Token::Char('/')) => Some(2),
+        _ => None,
     }
 }
 
+// PROGRAM -> FUNCTION    e.g. function foo() {}
+//         |  EXPRESSION  e.g. x + y
+fn parse_program (tokens_vec: Vec<Token>) -> ResultNode {
+    // Provide a shareable, mutable iterator over the characters.
+    let mut tokens = IntoIterator::into_iter(tokens_vec).peekable();
+
+    // Collect all of the top level functions and expressions.
+    let mut body: Vec<SyntaxNode> = Vec::new();
+
+    loop {
+        match tokens.peek() {
+            // Skip any top level semi-colons.
+            Some(&Token::Char(';')) => {
+                tokens.next();
+            },
+            // Process functions, which are only allowed at the top level.
+            Some(&Token::Function) => {
+                body.push(parse_function(&mut tokens)?);
+            },
+            // This is some kind of identifier or number, parse it as an expression.
+            Some(&Token::Identifier(_))
+            | Some(&Token::Number(_)) => {
+                body.push(parse_expression(&mut tokens)?);
+            },
+            // This is an unexpected character, error out.
+            Some(&Token::Char(_)) => {
+                return Err(ParseError::UnknownCharacterInProgram);
+            },
+            // The end of the token stream was reached, break the loop.
+            None => break,
+        }
+    }
+
+    // Take all of the SyntaxNodes generated by the above the loop, and package into a Program.
+    return Ok(SyntaxNode::Program(ProgramData {
+        body: body
+    }))
+}
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use tokens::get_tokens;
 
-    mod parse_prototype {
+    mod test_helpers {
         use super::*;
-
-        #[test]
-        fn no_args() {
-            assert_eq!(
-                parse_prototype(
-                    &mut IntoIterator::into_iter(vec![
-                        Token::Identifier(1),
-                        Token::Char('('),
-                        Token::Char(')'),
-                    ]).peekable()
-                ),
-                Ok(SyntaxNode::Prototype(PrototypeData {
-                    name: Some(1),
-                    args: Vec::new()
-                }))
-            );
-        }
-
-        #[test]
-        fn one_arg() {
-            assert_eq!(
-                parse_prototype(
-                    &mut IntoIterator::into_iter(vec![
-                        Token::Identifier(1),
-                        Token::Char('('),
-                        Token::Identifier(4),
-                        Token::Char(')'),
-                    ]).peekable()
-                ),
-                Ok(SyntaxNode::Prototype(PrototypeData {
-                    name: Some(1),
-                    args: vec![4]
-                }))
-            );
-        }
-
-        #[test]
-        fn multiple_args() {
-            assert_eq!(
-                parse_prototype(
-                    &mut IntoIterator::into_iter(vec![
-                        Token::Identifier(1),
-                        Token::Char('('),
-                        Token::Identifier(4),
-                        Token::Char(','),
-                        Token::Identifier(5),
-                        Token::Char(','),
-                        Token::Identifier(6),
-                        Token::Char(')'),
-                    ]).peekable()
-                ),
-                Ok(SyntaxNode::Prototype(PrototypeData {
-                    name: Some(1),
-                    args: vec![4, 5, 6]
-                }))
-            );
-        }
-
-        #[test]
-        fn no_arg_identifier() {
-            assert_eq!(
-                parse_prototype(
-                    &mut IntoIterator::into_iter(vec![
-                        Token::Identifier(1),
-                        Token::Char('('),
-                        Token::Char(','),
-                        Token::Char(','),
-                        Token::Identifier(5),
-                        Token::Char(')'),
-                    ]).peekable()
-                ),
-                Err(ParseError::NoArgIdentifier)
-            );
-        }
-
-        #[test]
-        fn expected_opening_parens() {
-            assert_eq!(
-                parse_prototype(
-                    &mut IntoIterator::into_iter(vec![
-                        Token::Identifier(1),
-                        Token::Identifier(5),
-                    ]).peekable()
-                ),
-                Err(ParseError::ExpectedOpeningParens)
-            );
-        }
-
-        #[test]
-        fn no_function_name() {
-            assert_eq!(
-                parse_prototype(
-                    &mut IntoIterator::into_iter(vec![
-                        Token::Char('(')
-                    ]).peekable()
-                ),
-                Err(ParseError::NoFunctionName)
-            );
-        }
-    }
-
-    mod parse_definition {
-        use super::*;
-
-        // #[test]
-        fn no_args() {
-            assert_eq!(
-                parse_definition(
-                    &mut IntoIterator::into_iter(vec![
-                        Token::Def,
-                        Token::Identifier(1),
-                        Token::Char('('),
-                        Token::Char(')'),
-                    ]).peekable()
-                ),
-                Ok(SyntaxNode::Definition(DefinitionData {
-                    prototype: Box::new(SyntaxNode::Prototype(PrototypeData {
-                        name: Some(1),
-                        args: Vec::new()
-                    })),
-                    body: Box::new(SyntaxNode::Empty),
-                }))
-            );
-        }
-    }
-
-    mod parse_expression {
-        use super::*;
-
-        fn binop_result_to_text(result: &Result<SyntaxNode, ParseError>) -> String {
+        pub fn binop_result_to_text(result: &Result<SyntaxNode, ParseError>) -> String {
             match result {
                 &Ok(ref ast) => binop_to_text(&ast),
                 &Err(ref err) => format!("{:?}", err)
             }
         }
 
-        fn binop_to_text(ast: &SyntaxNode) -> String {
+        pub fn binop_to_text(ast: &SyntaxNode) -> String {
             match ast {
                 &SyntaxNode::BinaryExpression(BinaryExpressionData {
                     operation: ref op,
-                    lhs: ref lhs,
-                    rhs: ref rhs
+                    ref lhs,
+                    ref rhs
                 }) => {
                     let lhs_text = binop_to_text(lhs);
                     let rhs_text = binop_to_text(rhs);
@@ -397,48 +233,47 @@ mod test {
             }
         }
 
-        #[test]
-        fn single_variable() {
-            assert_eq!(
-                binop_result_to_text(&parse_expression(
-                    &mut IntoIterator::into_iter(vec![
-                        Token::Identifier(1),
-                    ]).peekable()
-                )),
-                "1"
-            );
+        pub fn program_to_binop_text(result: &Result<SyntaxNode, ParseError>) -> String {
+            match result {
+                &Ok(SyntaxNode::Program(ProgramData { ref body })) => {
+                    match body.get(0) {
+                        Some(ref node) => binop_to_text(&node),
+                        _ => format!("Could not get a node out of the program"),
+                    }
+                },
+                &Ok(ref node) => format!("Not a program node {:?}", node),
+                &Err(ref err) => format!("{:?}", err),
+            }
         }
+    }
+    #[test]
+    fn single_binary_operation() {
+        let node = parse_program(get_tokens(&"a + b;"));
+        assert_eq!("(+ 0 1)", test_helpers::program_to_binop_text(&node));
+    }
 
-        #[test]
-        fn normal_binary_op() {
-            assert_eq!(
-                binop_result_to_text(&parse_expression(
-                    &mut IntoIterator::into_iter(vec![
-                        Token::Identifier(1),
-                        Token::Char('+'),
-                        Token::Identifier(2),
-                    ]).peekable()
-                )),
-                "(+ 1 2)"
-            );
-        }
+    #[test]
+    fn double_binary_operation() {
+        let node = parse_program(get_tokens(&"a + b + c;"));
+        assert_eq!("(+ (+ 0 1) 2)", test_helpers::program_to_binop_text(&node));
+    }
 
-        #[test]
-        fn two_binary_ops() {
-            println!("{:?} {:?}",
-                binop_result_to_text(&parse_expression(
-                    &mut IntoIterator::into_iter(vec![
-                        Token::Identifier(1),
-                        Token::Char('+'),
-                        Token::Identifier(2),
-                        Token::Char('+'),
-                        Token::Identifier(3),
-                    ]).peekable()
-                )),
-                "(+ (+ 1 2) 3)"
-            );
-        }
+    #[test]
+    fn double_binary_operation_mixed_precedence() {
+        let node = parse_program(get_tokens(&"a + b * c;"));
+        assert_eq!("(+ 0 (* 1 2))", test_helpers::program_to_binop_text(&node));
+    }
 
+    #[test]
+    fn double_binary_operation_mixed_precedence2() {
+        let node = parse_program(get_tokens(&"a * b + c;"));
+        assert_eq!("(+ (* 0 1) 2)", test_helpers::program_to_binop_text(&node));
+    }
+
+    #[test]
+    fn triple_binary_operation_1() {
+        let node = parse_program(get_tokens(&"a + b + c + d;"));
+        assert_eq!("(+ (+ (+ 0 1) 2) 3)", test_helpers::program_to_binop_text(&node));
     }
 
 }

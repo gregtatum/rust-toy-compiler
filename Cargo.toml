@@ -6,3 +6,4 @@ authors = ["Greg Tatum <tatum.creative@gmail.com>"]
 [dependencies]
 readline = { git = "https://github.com/shaleh/rust-readline" }
 term-painter = "0.2.4"
+pretty_assertions = "0.3.4"

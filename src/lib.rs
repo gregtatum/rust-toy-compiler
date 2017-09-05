@@ -1,3 +1,5 @@
+#[macro_use] extern crate pretty_assertions;
+
 pub mod tokens;
 pub mod parser;
 pub mod string_table;

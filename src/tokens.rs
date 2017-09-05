@@ -9,9 +9,8 @@ use string_table::StringIndex;
 
 #[derive(Debug, Clone)]
 pub enum Token {
-    Eof,
-    Def,
-    Extern,
+    Function,
+    // Extern,
     Identifier(StringIndex),
     Number(f64),
     Char(char),
@@ -41,9 +40,8 @@ fn char_to_enum(character: &char) -> Character {
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &Token::Eof => write!(f, "(eof)"),
-            &Token::Def => write!(f, "(def)"),
-            &Token::Extern => write!(f, "(extern)"),
+            &Token::Function => write!(f, "(function)"),
+            // &Token::Extern => write!(f, "(extern)"),
             &Token::Identifier(_) => write!(f, "(identifier)"),
             &Token::Number(n) => write!(f, "(number {})", n),
             &Token::Char(ref value) => write!(f, "(char {:?})", value),
@@ -77,16 +75,16 @@ pub fn get_tokens(text: &str) -> Vec<Token> {
             Some(character) => {
                 match char_to_enum(&character) {
                     Character::Whitespace => continue,
-                    Character::Value('#') => skip_to_end_of_line(&mut characters),
+                    Character::Value('/') => skip_to_end_of_line_if_comment(&mut characters),
                     Character::Numeric => tokens.push(
                         Token::Number(get_number(&mut characters, character))
                     ),
                     Character::Alpha => tokens.push({
                         let word = get_word(&mut characters, &character);
-                        if word == "def" {
-                            Token::Def
-                        } else if word == "extern" {
-                            Token::Extern
+                        if word == "function" {
+                            Token::Function
+                        // } else if word == "extern" {
+                            // Token::Extern
                         } else {
                             Token::Identifier(string_table.take_string(word))
                         }
@@ -101,14 +99,16 @@ pub fn get_tokens(text: &str) -> Vec<Token> {
     tokens
 }
 
-fn skip_to_end_of_line(characters: &mut Peekable<Chars>) {
+fn skip_to_end_of_line_if_comment(characters: &mut Peekable<Chars>) {
+    match characters.peek() {
+        Some(&'/') => {},
+        _ => return
+    }
+
     loop {
         match characters.next() {
-            Some(character) => {
-                if character == '\n' {
-                    break;
-                }
-            },
+            Some('\n') => break,
+            Some(_) => continue,
             None => break,
         }
     }
@@ -156,4 +156,46 @@ fn get_number(characters: &mut Peekable<Chars>, starting_digit: char) -> f64 {
     });
 
     return word.parse::<f64>().expect("Number should be validly parsed");
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    mod test_helpers {
+        use super::*;
+    }
+
+
+    #[test]
+    fn simple_expression() {
+        // println!("{:?}", get_tokens(&"a + b"));
+        assert_eq!(
+            format!("{:?}", get_tokens(&"a + b")),
+            "[Identifier(0), Char('+'), Identifier(1)]"
+        );
+    }
+    #[test]
+    fn simple_function() {
+        assert_eq!(
+            format!("{:?}", get_tokens(&"
+                function asdf() {
+
+                }
+            ")),
+            "[Function, Identifier(0), Char('('), Char(')'), Char('{'), Char('}')]"
+        );
+    }
+
+    #[test]
+    fn simple_comment() {
+        assert_eq!(
+            format!("{:?}", get_tokens(&"
+                // this is a comment
+                a
+            ")),
+            "[Identifier(0)]"
+        );
+    }
+
 }
