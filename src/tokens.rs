@@ -10,7 +10,9 @@ use string_table::StringIndex;
 #[derive(Debug, Clone)]
 pub enum Token {
     Function,
-    // Extern,
+    Return,
+    If,
+    Else,
     Identifier(StringIndex),
     Number(f64),
     Char(char),
@@ -41,7 +43,9 @@ impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &Token::Function => write!(f, "(function)"),
-            // &Token::Extern => write!(f, "(extern)"),
+            &Token::Return => write!(f, "(return)"),
+            &Token::If => write!(f, "(if)"),
+            &Token::Else => write!(f, "(else)"),
             &Token::Identifier(_) => write!(f, "(identifier)"),
             &Token::Number(n) => write!(f, "(number {})", n),
             &Token::Char(ref value) => write!(f, "(char {:?})", value),
@@ -83,8 +87,12 @@ pub fn get_tokens(text: &str) -> Vec<Token> {
                         let word = get_word(&mut characters, &character);
                         if word == "function" {
                             Token::Function
-                        // } else if word == "extern" {
-                            // Token::Extern
+                        } else if word == "if" {
+                            Token::If
+                        } else if word == "else" {
+                            Token::Else
+                        } else if word == "return" {
+                            Token::Return
                         } else {
                             Token::Identifier(string_table.take_string(word))
                         }
@@ -169,7 +177,6 @@ mod test {
 
     #[test]
     fn simple_expression() {
-        // println!("{:?}", get_tokens(&"a + b"));
         assert_eq!(
             format!("{:?}", get_tokens(&"a + b")),
             "[Identifier(0), Char('+'), Identifier(1)]"

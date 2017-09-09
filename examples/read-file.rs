@@ -32,5 +32,8 @@ fn main() {
     );
 
     let tokens = kal::get_tokens(&text);
-    println!("{:?}", Blue.bold().paint(tokens));
+    println!("{:?}", Blue.bold().paint(&tokens));
+
+    let ast = kal::parse_program(tokens);
+    println!("\n\n{:#?}", Magenta.bold().paint(ast));
 }
