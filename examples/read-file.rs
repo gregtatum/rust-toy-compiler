@@ -1,5 +1,5 @@
 extern crate term_painter;
-extern crate kal;
+extern crate toy;
 
 use term_painter::ToStyle;
 use term_painter::Color::*;
@@ -31,9 +31,9 @@ fn main() {
         White.bold().paint(&text),
     );
 
-    let tokens = kal::get_tokens(&text);
+    let tokens = toy::get_tokens(&text);
     println!("{:?}", Blue.bold().paint(&tokens));
 
-    let ast = kal::parse_program(tokens);
+    let ast = toy::parse_program(tokens);
     println!("\n\n{:#?}", Magenta.bold().paint(ast));
 }
